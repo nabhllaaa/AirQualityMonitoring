@@ -1,78 +1,100 @@
-#include <SoftwareSerial.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 #include <TinyGPS++.h>
+#include <DHT.h>
 
-// Definisi Pin SoftwareSerial ESP8266
-static const int RXPin = D6;   // Terhubung ke TX Modul GPS
-static const int TXPin = D5;   // Terhubung ke RX Modul GPS
-static const uint32_t GPSBaud = 9600;
+#define GPS_RX 26   // GPIO26 <- TX modul GPS
+#define GPS_TX 25   // GPIO25 -> RX modul GPS
+#define GPS_BAUD 9600
+#define DHTPIN 4
+#define DHTTYPE DHT22
 
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 TinyGPSPlus gps;
-SoftwareSerial gpsSerial(RXPin, TXPin);
+DHT dht(DHTPIN, DHTTYPE);
+
+void tampil(int baris, const char *teks) {
+  char buf[17];
+  snprintf(buf, sizeof(buf), "%-16s", teks);
+  lcd.setCursor(0, baris);
+  lcd.print(buf);
+}
 
 void setup() {
   Serial.begin(115200);
-  gpsSerial.begin(GPSBaud);
+  delay(500);
 
-  Serial.println();
-  Serial.println("==============================================");
-  Serial.println("   AirRespirA System - GPS & Timestamp UTC/WIB");
-  Serial.println("==============================================");
+  Serial2.setRxBufferSize(1024);
+  Serial2.begin(GPS_BAUD, SERIAL_8N1, GPS_RX, GPS_TX);
+
+  Wire.begin(21, 22);
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+  dht.begin();
+
+  tampil(0, " AirRespirA GPS");
+  tampil(1, " System Ready!");
+  delay(2000);
+  lcd.clear();
+
+  Serial.println("\n--- MONITORING AIRRESPIRA (GPS + DHT22 + LCD) ---");
+  Serial.println("Waktu,Latitude,Longitude,Satelit,Suhu(C),Kelembapan(%)");
 }
 
 void loop() {
-  // 1. Parsing stream data GPS
-  while (gpsSerial.available() > 0) {
-    gps.encode(gpsSerial.read());
+  while (Serial2.available() > 0) gps.encode(Serial2.read());
+
+  static unsigned long lastReport = 0;
+  static unsigned long lastDht = 0;
+  static float suhu = NAN, hum = NAN;
+
+  // Baca DHT22 tiap 2 detik (sensor ini lambat)
+  if (millis() - lastDht >= 2000) {
+    lastDht = millis();
+    suhu = dht.readTemperature();
+    hum = dht.readHumidity();
   }
 
-  // 2. Tampilkan data setiap 2 detik
-  static unsigned long lastReport = 0;
-  if (millis() - lastReport >= 2000) {
+  if (millis() - lastReport >= 1000) {
     lastReport = millis();
 
-    Serial.println("----------------------------------------------");
-    
-    if (gps.location.isValid()) {
-      Serial.print("Status Sinyal : "); Serial.println("LOCKED (Valid)");
-      Serial.print("Latitude      : "); Serial.println(gps.location.lat(), 6);
-      Serial.print("Longitude     : "); Serial.println(gps.location.lng(), 6);
-      Serial.print("Jumlah Satelit: "); Serial.println(gps.satellites.value());
-      Serial.print("Ketinggian    : "); Serial.print(gps.altitude.meters()); Serial.println(" m");
-      Serial.print("Kecepatan     : "); Serial.print(gps.speed.kmph()); Serial.println(" km/jam");
+    char l1[17], l2[17];
+    bool halamanGps = ((millis() / 3000) % 2 == 0);
 
-      // --- PARAMETER TIMESTAMP ---
-      if (gps.date.isValid() && gps.time.isValid()) {
-        // Formating Tanggal (DD/MM/YYYY)
-        char dateStr[15];
-        sprintf(dateStr, "%02d/%02d/%04d", gps.date.day(), gps.date.month(), gps.date.year());
-        
-        // Formating Waktu UTC (HH:MM:SS)
-        char timeUtcStr[15];
-        sprintf(timeUtcStr, "%02d:%02d:%02d", gps.time.hour(), gps.time.minute(), gps.time.second());
-
-        // Konversi ke Waktu Indonesia Barat (WIB = UTC + 7 Jam)
-        int hourWib = (gps.time.hour() + 7) % 24;
-        char timeWibStr[15];
-        sprintf(timeWibStr, "%02d:%02d:%02d", hourWib, gps.time.minute(), gps.time.second());
-
-        // Format ISO 8601 Timestamp (Cocok untuk logging SD Card / API Database Backend)
-        char isoTimestamp[30];
-        sprintf(isoTimestamp, "%04d-%02d-%02dT%02d:%02d:%02d+07:00", 
-                gps.date.year(), gps.date.month(), gps.date.day(),
-                hourWib, gps.time.minute(), gps.time.second());
-
-        Serial.print("Tanggal       : "); Serial.println(dateStr);
-        Serial.print("Waktu UTC     : "); Serial.println(timeUtcStr);
-        Serial.print("Waktu WIB     : "); Serial.println(timeWibStr);
-        Serial.print("ISO Timestamp : "); Serial.println(isoTimestamp);
+    if (halamanGps) {
+      if (gps.location.isValid()) {
+        int jam = (gps.time.hour() + 7) % 24;
+        snprintf(l1, sizeof(l1), "%02d:%02d:%02d Sat:%02d",
+                 jam, gps.time.minute(), gps.time.second(),
+                 (int)gps.satellites.value());
+        snprintf(l2, sizeof(l2), "%.4f,%.4f",
+                 gps.location.lat(), gps.location.lng());
       } else {
-        Serial.println("Timestamp     : Membaca waktu satelit...");
+        snprintf(l1, sizeof(l1), "Mencari Satelit");
+        snprintf(l2, sizeof(l2), "Terdeteksi: %d", (int)gps.satellites.value());
       }
-
     } else {
-      Serial.print("Status Sinyal : Mencari Satelit... (Terdeteksi: ");
-      Serial.print(gps.satellites.value());
-      Serial.println(" satelit)");
+      if (isnan(suhu) || isnan(hum)) {
+        snprintf(l1, sizeof(l1), "Suhu: Error");
+        snprintf(l2, sizeof(l2), "Hum : Error");
+      } else {
+        snprintf(l1, sizeof(l1), "Suhu: %.1f C", suhu);
+        snprintf(l2, sizeof(l2), "Hum : %.0f %%", hum);
+      }
+    }
+    tampil(0, l1);
+    tampil(1, l2);
+
+    // Log serial
+    if (gps.location.isValid()) {
+      int jam = (gps.time.hour() + 7) % 24;
+      Serial.printf("%02d:%02d:%02d, %.6f, %.6f, %d, %.1f, %.0f\n",
+                    jam, gps.time.minute(), gps.time.second(),
+                    gps.location.lat(), gps.location.lng(),
+                    (int)gps.satellites.value(), suhu, hum);
+    } else {
+      Serial.printf("Mencari satelit... Suhu %.1f C, Hum %.0f %%\n", suhu, hum);
     }
   }
 }
