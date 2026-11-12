@@ -8,8 +8,8 @@
 // ==========================================
 // KONTROL WIFI & SUPABASE
 // ==========================================
-const char* WIFI_SSID     = "Krisaturnus";     
-const char* WIFI_PASSWORD = "1sampe8000"; 
+const char* WIFI_SSID     = "nisa";     
+const char* WIFI_PASSWORD = "12345678"; 
 
 const char* SUPABASE_URL  = "https://tvoicnwwvjqdfknfwhmj.supabase.co/rest/v1/airrespira_logs";
 const char* SUPABASE_KEY  = "sb_publishable_pp6T6a_nFDWeKYtidPh2Rw_vxe6tscM"; 
@@ -58,8 +58,9 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print(" Starting Up... ");
 
-  // Inisialisasi Wi-Fi Sekali Saja saat Bootup
+  // Inisialisasi Wi-Fi dengan AutoReconnect bawaan
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
@@ -102,20 +103,11 @@ void loop() {
     gps.encode(Serial2.read());
   }
 
-  // 2. Auto-reconnect Wi-Fi aman (Cek tiap 10 detik jika terputus)
-  static unsigned long lastWifiCheck = 0;
-  if (millis() - lastWifiCheck >= 10000) {
-    lastWifiCheck = millis();
-    if (WiFi.status() != WL_CONNECTED) {
-      WiFi.reconnect();
-    }
-  }
-
-  // 3. Update LCD & Sampling Sensor (Tiap 1 Detik)
+  // 2. Update LCD & Sampling Sensor (Tiap 1 Detik)
   static unsigned long lastLcdUpdate = 0;
   static bool displayToggle = false;
 
-  if (millis() - lastLcdUpdate >= 1000) {
+  if (millis() - lastLcdUpdate >= 5000) {
     lastLcdUpdate = millis();
 
     // Moving Average 10 Sampel GP2Y
@@ -133,8 +125,8 @@ void loop() {
     float avgMv = totalMv / sampleCount;
     calcVoltage = avgMv / 1000.0f;
 
-    if (calcVoltage >= 1.50) {
-      dustDensity = (calcVoltage - 1.50) / 0.005f;
+    if (calcVoltage >= 0.90) {
+      dustDensity = (calcVoltage - 0.90) / 0.005f;
     } else {
       dustDensity = 0.0;
     }
@@ -184,9 +176,9 @@ void loop() {
     lcd.print(line2);
   }
 
-  // 4. Push ke Supabase (Tiap 3 Detik)
+  // 3. Push ke Supabase (Tiap 5 Detik)
   static unsigned long lastCloudPush = 0;
-  if (millis() - lastCloudPush >= 3000) {
+  if (millis() - lastCloudPush >= 5000) {
     lastCloudPush = millis();
 
     if (gps.location.isValid()) {
