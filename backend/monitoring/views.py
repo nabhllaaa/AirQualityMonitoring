@@ -60,3 +60,39 @@ class TrenPerJam(APIView):
         for baris in hasil:
             baris["ispu"], baris["kategori"] = hitung_ispu(baris["pm25_rata"])
         return Response(hasil)
+
+class PetaGeoJSON(APIView):
+    def get(self, request):
+        try:
+            jam = int(request.query_params.get("jam", 24))
+        except ValueError:
+            jam = 24
+        jam = min(max(jam, 1), 168)
+
+        batas = timezone.now() - timedelta(hours=jam)
+        data = (
+            AirrespiraLog.objects.filter(
+                created_at__gte=batas,
+                latitude__isnull=False,
+                longitude__isnull=False,
+                pm25__isnull=False,
+            )
+            .exclude(latitude=0, longitude=0)
+            .order_by("-created_at")[:1000]
+        )
+
+        fitur = []
+        for d in data:
+            ispu, kategori = hitung_ispu(d.pm25)
+            fitur.append({
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [d.longitude, d.latitude]},
+                "properties": {
+                    "id": d.id,
+                    "waktu": timezone.localtime(d.created_at).isoformat(),
+                    "pm25": d.pm25,
+                    "ispu": ispu,
+                    "kategori": kategori,
+                },
+            })
+        return Response({"type": "FeatureCollection", "features": fitur})
