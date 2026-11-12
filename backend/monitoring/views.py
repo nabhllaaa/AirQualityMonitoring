@@ -1,7 +1,7 @@
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.conf import settings
-from django.db.models import Avg, Count, Max
+from django.db.models import Avg, Count, Max, Min
 from django.db.models.functions import TruncHour
 from django.utils import timezone
 from rest_framework import generics
@@ -9,8 +9,8 @@ from rest_framework.permissions import BasePermission, SAFE_METHODS
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import AirrespiraLog
 from .ispu import hitung_ispu
+from .models import AirrespiraLog
 from .serializers import AirrespiraLogSerializer
 
 
@@ -53,13 +53,14 @@ class TrenPerJam(APIView):
                 kelembapan_rata=Avg("humidity"),
                 jumlah_data=Count("id"),
             )
-                        .order_by("jam")
+            .order_by("jam")
         )
 
         hasil = list(data)
         for baris in hasil:
             baris["ispu"], baris["kategori"] = hitung_ispu(baris["pm25_rata"])
         return Response(hasil)
+
 
 class PetaGeoJSON(APIView):
     def get(self, request):
@@ -96,3 +97,41 @@ class PetaGeoJSON(APIView):
                 },
             })
         return Response({"type": "FeatureCollection", "features": fitur})
+
+
+class DataTerkini(APIView):
+    def get(self, request):
+        terakhir = AirrespiraLog.objects.order_by("-created_at").first()
+        if terakhir is None:
+            return Response({"ada_data": False})
+        umur = (timezone.now() - terakhir.created_at).total_seconds()
+        return Response({
+            "ada_data": True,
+            "alat_aktif": umur < 120,
+            "umur_detik": round(umur),
+            "data": AirrespiraLogSerializer(terakhir).data,
+        })
+
+
+class RingkasanHarian(APIView):
+    def get(self, request):
+        tanggal = request.query_params.get("tanggal") or timezone.localdate().isoformat()
+        try:
+            date.fromisoformat(tanggal)
+        except ValueError:
+            return Response({"detail": "Format tanggal harus YYYY-MM-DD"}, status=400)
+
+        qs = AirrespiraLog.objects.filter(created_at__date=tanggal, pm25__isnull=False)
+        hasil = qs.aggregate(
+            pm25_rata=Avg("pm25"),
+            pm25_min=Min("pm25"),
+            pm25_maks=Max("pm25"),
+            suhu_rata=Avg("temperature"),
+            kelembapan_rata=Avg("humidity"),
+            jumlah_data=Count("id"),
+        )
+        if hasil["jumlah_data"] == 0:
+            return Response({"tanggal": tanggal, "jumlah_data": 0})
+        hasil["ispu"], hasil["kategori"] = hitung_ispu(hasil["pm25_rata"])
+        hasil["tanggal"] = tanggal
+        return Response(hasil)

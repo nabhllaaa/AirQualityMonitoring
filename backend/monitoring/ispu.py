@@ -1,4 +1,6 @@
-# Batas konsentrasi PM2.5 (µg/m3) -> rentang ISPU, untuk interpolasi linear
+import math
+
+# Batas konsentrasi PM2.5 (ug/m3) -> rentang ISPU, untuk interpolasi linear
 BATAS_PM25 = [
     # (Xb,   Xa,    Ib,  Ia)
     (0.0,    15.5,   0,   50),
@@ -9,14 +11,15 @@ BATAS_PM25 = [
 ]
 
 
-def kategori_ispu(nilai):
-    if nilai <= 50:
+def kategori_pm25(pm25):
+    """Kategori langsung dari kadar PM2.5, sama dengan pseudocode di LLD proposal."""
+    if pm25 <= 15.5:
         return "Baik"
-    if nilai <= 100:
+    if pm25 <= 55.4:
         return "Sedang"
-    if nilai <= 200:
+    if pm25 <= 150.4:
         return "Tidak Sehat"
-    if nilai <= 300:
+    if pm25 <= 250.4:
         return "Sangat Tidak Sehat"
     return "Berbahaya"
 
@@ -31,5 +34,5 @@ def hitung_ispu(pm25):
         if pm25 <= xa:
             ispu = (ia - ib) / (xa - xb) * (pm25 - xb) + ib
             break
-    ispu = round(ispu)
-    return ispu, kategori_ispu(ispu)
+    ispu = math.ceil(round(ispu, 6))
+    return ispu, kategori_pm25(pm25)
