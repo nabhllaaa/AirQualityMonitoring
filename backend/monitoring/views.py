@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import AirrespiraLog
+from .ispu import hitung_ispu
 from .serializers import AirrespiraLogSerializer
 
 
@@ -52,6 +53,10 @@ class TrenPerJam(APIView):
                 kelembapan_rata=Avg("humidity"),
                 jumlah_data=Count("id"),
             )
-            .order_by("jam")
+                        .order_by("jam")
         )
-        return Response(list(data))
+
+        hasil = list(data)
+        for baris in hasil:
+            baris["ispu"], baris["kategori"] = hitung_ispu(baris["pm25_rata"])
+        return Response(hasil)
